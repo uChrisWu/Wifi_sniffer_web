@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="us-EN">
 <head>
   <meta charset="UTF-8" />
-  <title>ESP32 人数监控 - 简单版</title>
+  <title>ESP32 ESP32 Crowded Monitor - Chart</title>
   <style>
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -11,11 +11,11 @@
       padding: 0;
     }
     .container {
-      max-width: 600px;
+      max-width: 900px;
       margin: 40px auto;
       background: #fff;
       border-radius: 12px;
-      padding: 24px 28px;
+      padding: 24px 28px 32px;
       box-shadow: 0 6px 18px rgba(0,0,0,0.08);
     }
     h1 {
@@ -47,7 +47,7 @@
       margin-right: 0;
     }
     .meta {
-      margin-top: 20px;
+      margin-top: 16px;
       font-size: 13px;
       color: #777;
     }
@@ -59,26 +59,29 @@
       background: #eee;
       margin-left: 6px;
     }
+    .chart-container {
+      margin-top: 30px;
+    }
   </style>
-  <script>
-    // 每 2 秒刷新一次（简单版）
-    setInterval(() => {
-      window.location.reload();
-    }, 2000);
-  </script>
+
+  <!-- 从 CDN 引入 Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="container">
-    <h1>ESP32 人数监控</h1>
+    <h1>ESP32 Crowded Monitor</h1>
 
+    <!-- 顶部当前数值 -->
     <div class="row">
       <div class="card">
-        <div class="label">瞬时人数 (instant)</div>
-        <p class="value">{{ data.instant if data.instant is not none else "-" }}</p>
+        <div class="label">crowded (instant)</div>
+        <p id="instantValue" class="value">
+          {{ data.instant if data.instant is not none else "-" }}
+        </p>
       </div>
       <div class="card">
-        <div class="label">平滑人数 (smoothed)</div>
-        <p class="value">
+        <div class="label">crowded (smoothed)</div>
+        <p id="smoothedValue" class="value">
           {% if data.smoothed is not none %}
             {{ "%.1f" % data.smoothed }}
           {% else %}
@@ -89,29 +92,148 @@
     </div>
 
     <div class="meta">
-      <div>最后数据时间：
+      <div>Last data update：
+        <span id="timeValue">
         {% if data.time %}
           {{ data.time }}
         {% else %}
-          (还没有收到任何数据)
+          (No data)
         {% endif %}
+        </span>
       </div>
-      <div>最后发送设备 IP：
+      <div>Last active IP：
+        <span id="ipValue">
         {% if data.ip %}
           {{ data.ip }}
         {% else %}
           -
         {% endif %}
+        </span>
       </div>
       <div style="margin-top:8px;">
-        状态
+        status:
         {% if data.time %}
-          <span class="badge">正在接收数据</span>
+          <span class="badge" id="statusBadge">collecting data</span>
         {% else %}
-          <span class="badge">等待 ESP32 上传...</span>
+          <span class="badge" id="statusBadge">waiting for ESP32 upload...</span>
         {% endif %}
       </div>
     </div>
+
+    <!-- 折线图区域 -->
+    <div class="chart-container">
+      <canvas id="peopleChart" height="120"></canvas>
+    </div>
   </div>
+
+  <script>
+    // 初始化 Chart.js
+    const ctx = document.getElementById('peopleChart').getContext('2d');
+
+    const chartData = {
+      labels: [],    // 时间
+      datasets: [
+        {
+          label: 'instant',
+          data: [],
+          borderWidth: 2,
+          tension: 0.25
+        },
+        {
+          label: 'smoothed',
+          data: [],
+          borderWidth: 2,
+          borderDash: [4, 4],
+          tension: 0.25
+        }
+      ]
+    };
+
+    const chartOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      scales: {
+        x: {
+          ticks: {
+            // 只显示时间中的 HH:MM:SS 部分
+            callback: function(value, index) {
+              const label = this.getLabelForValue(value);
+              if (!label) return '';
+              const parts = label.split(' ');
+              return parts.length > 1 ? parts[1].replace(' UTC', '') : label;
+            }
+          }
+        },
+        y: {
+          beginAtZero: true,
+          ticks: {
+            precision: 0
+          }
+        }
+      },
+      plugins: {
+        legend: {
+          display: true
+        }
+      }
+    };
+
+    const peopleChart = new Chart(ctx, {
+      type: 'line',
+      data: chartData,
+      options: chartOptions
+    });
+
+    // 更新顶部数字和状态
+    function updateTopInfo(latestPoint) {
+      if (!latestPoint) return;
+
+      const instantElem  = document.getElementById('instantValue');
+      const smoothedElem = document.getElementById('smoothedValue');
+      const timeElem     = document.getElementById('timeValue');
+      const statusBadge  = document.getElementById('statusBadge');
+
+      instantElem.textContent  = latestPoint.instant ?? '-';
+      smoothedElem.textContent = (latestPoint.smoothed != null)
+        ? latestPoint.smoothed.toFixed(1)
+        : '-';
+      timeElem.textContent     = latestPoint.time ?? '(unknown time)';
+      statusBadge.textContent  = 'collecting data...';
+    }
+
+    // 从后端获取历史数据并更新图表
+    async function fetchHistory() {
+      try {
+        const res = await fetch('/data');
+        const json = await res.json();
+        const points = json.points || [];
+
+        chartData.labels.length = 0;
+        chartData.datasets[0].data.length = 0;
+        chartData.datasets[1].data.length = 0;
+
+        for (const p of points) {
+          chartData.labels.push(p.time);
+          chartData.datasets[0].data.push(p.instant);
+          chartData.datasets[1].data.push(p.smoothed);
+        }
+
+        peopleChart.update('none'); // 'none' 使更新更平滑
+
+        // 更新顶部最新数据（最后一个点）
+        if (points.length > 0) {
+          updateTopInfo(points[points.length - 1]);
+        }
+      } catch (e) {
+        console.error('fetchHistory error:', e);
+        const statusBadge = document.getElementById('statusBadge');
+        statusBadge.textContent = '数据获取失败';
+      }
+    }
+
+    // 每 5 秒拉一次数据
+    fetchHistory();
+    setInterval(fetchHistory, 5000);
+  </script>
 </body>
 </html>

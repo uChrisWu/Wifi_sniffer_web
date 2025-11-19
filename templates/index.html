@@ -197,7 +197,10 @@
       smoothedElem.textContent = (latestPoint.smoothed != null)
         ? latestPoint.smoothed.toFixed(1)
         : '-';
-      timeElem.textContent     = latestPoint.time ?? '(unknown time)';
+      if (latestPoint.time) {
+        const utcDate = new Date(latestPoint.time.replace(" UTC", "Z"));
+        timeElem.textContent = utcDate.toLocaleString();  
+      }
       statusBadge.textContent  = 'collecting data...';
     }
 

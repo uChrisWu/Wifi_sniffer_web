@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from collections import deque
 from flask import Flask, request, jsonify, render_template
 
@@ -14,7 +14,8 @@ latest_data = {
 }
 
 # 历史记录：保存最近 N 条（例如 720 条，如果 ESP32 每 5 秒上传一次 ≈ 1 小时）
-HISTORY_MAX_POINTS = 720
+HISTORY_MAX_POINTS = 720          # 保持不变，最多存 720 条
+HISTORY_WINDOW_SEC = 3600         # 只展示最近 1 小时 = 3600 秒
 history = deque(maxlen=HISTORY_MAX_POINTS)
 
 
@@ -61,17 +62,25 @@ def upload():
 @app.route("/data", methods=["GET"])
 def get_data():
     """
-    前端用来获取历史数据的接口，返回：
-    {
-      "points": [
-        {"time": "...", "instant": 3, "smoothed": 2.5},
-        ...
-      ]
-    }
+    前端用来获取历史数据的接口，只返回最近 1 小时的数据。
     """
+    now = datetime.utcnow()
+    filtered = []
+
+    for p in history:
+        try:
+            t = datetime.strptime(p["time"], "%Y-%m-%d %H:%M:%S UTC")
+        except Exception:
+            # 时间解析失败就跳过
+            continue
+
+        if (now - t).total_seconds() <= HISTORY_WINDOW_SEC:
+            filtered.append(p)
+
     return jsonify({
-        "points": list(history)
+        "points": filtered
     })
+
 
 
 if __name__ == "__main__":

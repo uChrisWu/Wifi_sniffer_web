@@ -155,13 +155,6 @@
       scales: {
         x: {
           ticks: {
-            // 只显示时间中的 HH:MM:SS 部分
-            callback: function(value, index) {
-              const label = this.getLabelForValue(value);
-              if (!label) return '';
-              const parts = label.split(' ');
-              return parts.length > 1 ? parts[1].replace(' UTC', '') : label;
-            }
           }
         },
         y: {
@@ -215,11 +208,25 @@
         chartData.datasets[0].data.length = 0;
         chartData.datasets[1].data.length = 0;
 
-        for (const p of points) {
-          chartData.labels.push(p.time);
-          chartData.datasets[0].data.push(p.instant);
-          chartData.datasets[1].data.push(p.smoothed);
-        }
+            for (const p of points) {
+                // p.time 是类似 "2025-01-01 10:30:00 UTC"
+                // 转成 Date，再转成本地时间字符串
+                if (p.time) {
+                    const utcDate = new Date(p.time.replace(" UTC", "Z"));
+                    // 只显示时间部分：HH:MM:SS（本地时区）
+                    const localLabel = utcDate.toLocaleTimeString([], {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit'
+                    });
+                    chartData.labels.push(localLabel);
+                } else {
+                    chartData.labels.push('');
+                }
+
+                chartData.datasets[0].data.push(p.instant);
+                chartData.datasets[1].data.push(p.smoothed);
+            }
 
         peopleChart.update('none'); // 'none' 使更新更平滑
 
